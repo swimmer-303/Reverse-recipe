@@ -46,7 +46,7 @@ async function prepareImage(
   };
 }
 
-type Phase = "idle" | "ready" | "loading" | "done" | "limit" | "error";
+type Phase = "idle" | "ready" | "loading" | "done" | "needkey" | "error";
 
 // Cycled through while the model works, so the wait feels less like a stall.
 const COOKING_LINES = [
@@ -69,6 +69,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [userKey, setUserKey] = useState("");
   const [savedKey, setSavedKey] = useState<string>("");
+  const [keyReason, setKeyReason] = useState<"limit" | "missing">("limit");
   const [loadingLine, setLoadingLine] = useState(0);
 
   const fileInput = useRef<HTMLInputElement>(null);
@@ -125,7 +126,13 @@ export default function Home() {
 
         if (!res.ok) {
           if (data.code === "RATE_LIMIT" && data.error === "limit") {
-            setPhase("limit");
+            setKeyReason("limit");
+            setPhase("needkey");
+            return;
+          }
+          if (data.code === "NO_KEY") {
+            setKeyReason("missing");
+            setPhase("needkey");
             return;
           }
           setError(data.error || "Something went wrong.");
@@ -249,12 +256,12 @@ export default function Home() {
         </div>
       )}
 
-      {phase === "limit" && (
+      {phase === "needkey" && (
         <div className="notice">
           <p>
-            The shared demo key just ran out of free requests for now. You can
-            keep going instantly with your own free Google AI key — it stays in
-            your browser and is only sent along with this request.
+            {keyReason === "missing"
+              ? "This demo needs a Google AI key to read your photo. Drop in your own free key and you're cooking — it stays in your browser and is only sent along with this request."
+              : "The shared demo key just ran out of free requests for now. You can keep going instantly with your own free Google AI key — it stays in your browser and is only sent along with this request."}
           </p>
           <div className="key-row">
             <input

@@ -41,9 +41,11 @@ export async function POST(req: NextRequest) {
   const usingOwnKey = Boolean(userKey?.trim());
 
   if (!key) {
+    // No server key set. Rather than dead-ending, invite the visitor to bring
+    // their own free key — same soft-fail path as hitting the quota.
     return NextResponse.json(
-      { error: "The server isn't configured with an API key yet." },
-      { status: 500 }
+      { error: "missing", code: "NO_KEY" },
+      { status: 503 }
     );
   }
 
