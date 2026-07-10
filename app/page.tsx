@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Analysis } from "./api/analyze/gemini";
 import Result from "./components/Result";
 
@@ -48,6 +48,15 @@ async function prepareImage(
 
 type Phase = "idle" | "ready" | "loading" | "done" | "limit" | "error";
 
+// Cycled through while the model works, so the wait feels less like a stall.
+const COOKING_LINES = [
+  "Looking at what's on the plate...",
+  "Picking out the ingredients...",
+  "Doing the calorie math...",
+  "Writing up the steps...",
+  "Plating your recipe...",
+];
+
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [preview, setPreview] = useState<string | null>(null);
@@ -60,8 +69,22 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [userKey, setUserKey] = useState("");
   const [savedKey, setSavedKey] = useState<string>("");
+  const [loadingLine, setLoadingLine] = useState(0);
 
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Advance the loading copy every couple of seconds, but stop at the last
+  // line so it doesn't loop forever on a slow request.
+  useEffect(() => {
+    if (phase !== "loading") {
+      setLoadingLine(0);
+      return;
+    }
+    const id = setInterval(() => {
+      setLoadingLine((n) => Math.min(n + 1, COOKING_LINES.length - 1));
+    }, 2200);
+    return () => clearInterval(id);
+  }, [phase]);
 
   const handleFile = useCallback(async (file: File | undefined) => {
     if (!file) return;
@@ -220,7 +243,9 @@ export default function Home() {
       {phase === "loading" && (
         <div className="thinking">
           <span className="spinner" />
-          Tasting the pixels and writing your recipe...
+          <span key={loadingLine} className="thinking-line">
+            {COOKING_LINES[loadingLine]}
+          </span>
         </div>
       )}
 
