@@ -1,115 +1,14 @@
-// Client-side speech controller. It prefers Gemini's neural voice (fetched from
-// /api/speak and played as real audio), which sounds like a person — and only
-// falls back to the browser's built-in Web Speech voice if that call fails
-// (offline, no key, rate limited). The browser voice is the safety net, not the
-// default, because on most devices it sounds robotic no matter how it's tuned.
-
-// ---------------------------------------------------------------------------
-// Gemini neural audio (primary)
-// ---------------------------------------------------------------------------
-
-let audioEl: HTMLAudioElement | null = null;
-const urlCache = new Map<string, string>(); // text -> object URL
-const inflight = new Map<string, Promise<string | null>>();
-let token = 0; // bumps on every stop/new speak to cancel stale playback
-
-function getAudio(): HTMLAudioElement {
-  if (!audioEl) audioEl = new Audio();
-  return audioEl;
-}
-
-async function fetchAudioUrl(
-  text: string,
-  userKey?: string
-): Promise<string | null> {
-  const cached = urlCache.get(text);
-  if (cached) return cached;
-  const pending = inflight.get(text);
-  if (pending) return pending;
-
-  const p = (async () => {
-    try {
-      const res = await fetch("/api/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, userKey: userKey || undefined }),
-      });
-      if (!res.ok) return null;
-      const blob = await res.blob();
-      if (!blob.size) return null;
-      const url = URL.createObjectURL(blob);
-      urlCache.set(text, url);
-      return url;
-    } catch {
-      return null;
-    } finally {
-      inflight.delete(text);
-    }
-  })();
-
-  inflight.set(text, p);
-  return p;
-}
-
-// Warm the cache so the next step is ready to play instantly.
-export function prefetchSpeech(text: string, userKey?: string) {
-  const t = text.trim();
-  if (t) fetchAudioUrl(t, userKey);
-}
+// On-device read-aloud via the browser's Web Speech API. It's free and works
+// everywhere, but the voice quality is capped by whatever the device ships —
+// we pick the most natural installed voice and speak a line at a time (each
+// queues separately, which dodges Chrome's ~15s mid-utterance cutoff).
 
 export interface SpeakOpts {
+  // Accepted for call-site compatibility; unused by the on-device voice.
   userKey?: string;
   onStart?: () => void;
   onEnd?: () => void;
 }
-
-// Speak a block of text. Resolves when playback finishes (or falls back).
-export async function speak(text: string, opts: SpeakOpts = {}): Promise<void> {
-  const clean = text.trim();
-  if (!clean) return;
-  stopSpeech();
-  const mine = ++token;
-
-  const url = await fetchAudioUrl(clean, opts.userKey);
-  if (mine !== token) return; // superseded while fetching
-
-  if (url) {
-    const el = getAudio();
-    el.src = url;
-    el.onended = () => {
-      if (mine === token) opts.onEnd?.();
-    };
-    opts.onStart?.();
-    try {
-      await el.play();
-      return;
-    } catch {
-      // Autoplay blocked or decode failed — fall through to the browser voice.
-      if (mine !== token) return;
-    }
-  }
-
-  // Fallback: on-device speech synthesis.
-  if (mine !== token) return;
-  browserSpeak(clean, opts.onStart, opts.onEnd);
-}
-
-export function stopSpeech() {
-  token++;
-  if (audioEl) {
-    audioEl.pause();
-    audioEl.onended = null;
-    // Detach the source so a paused clip can't resume on its own.
-    audioEl.removeAttribute("src");
-  }
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Browser Web Speech fallback
-// ---------------------------------------------------------------------------
 
 let cachedVoices: SpeechSynthesisVoice[] = [];
 
@@ -174,30 +73,31 @@ function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null 
   return best ?? pool[0];
 }
 
-// Warm the voice list on first import so the fallback is ready if needed.
+// Warm the voice list on first import so the first read is ready.
 if (typeof window !== "undefined") {
   loadVoices();
 }
 
-function browserSpeak(
-  text: string,
-  onStart?: () => void,
-  onEnd?: () => void
-) {
-  if (typeof window === "undefined" || !window.speechSynthesis) {
-    onEnd?.();
+// No-op: the on-device voice needs no pre-fetching. Kept so callers (cook mode)
+// don't need to branch.
+export function prefetchSpeech(_text: string, _userKey?: string) {}
+
+export function speak(text: string, opts: SpeakOpts = {}): void {
+  const clean = text.trim();
+  if (!clean || typeof window === "undefined" || !window.speechSynthesis) {
+    opts.onEnd?.();
     return;
   }
   const synth = window.speechSynthesis;
   synth.cancel();
   const voice = pickVoice(cachedVoices);
-  // Split into sentence-sized chunks: each queues separately, which keeps a
-  // long read from tripping Chrome's mid-utterance cutoff.
-  const lines = text
+  // Sentence-sized chunks: each queues separately so a long read doesn't trip
+  // Chrome's mid-utterance cutoff.
+  const lines = clean
     .split(/(?<=[.!?])\s+/)
     .map((l) => l.trim())
     .filter(Boolean);
-  const chunks = lines.length ? lines : [text];
+  const chunks = lines.length ? lines : [clean];
   chunks.forEach((line, i) => {
     const u = new SpeechSynthesisUtterance(line);
     if (voice) {
@@ -206,8 +106,14 @@ function browserSpeak(
     }
     u.rate = 1.0;
     u.pitch = 1.05;
-    if (i === 0 && onStart) u.onstart = onStart;
-    if (i === chunks.length - 1 && onEnd) u.onend = onEnd;
+    if (i === 0 && opts.onStart) u.onstart = opts.onStart;
+    if (i === chunks.length - 1 && opts.onEnd) u.onend = opts.onEnd;
     synth.speak(u);
   });
+}
+
+export function stopSpeech(): void {
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
 }
