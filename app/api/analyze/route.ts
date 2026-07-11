@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
         );
       }
       return NextResponse.json(
-        { error: "The AI had trouble with that one. Try another photo." },
+        { error: "We couldn't quite make out that dish. Try another photo." },
         { status: 502 }
       );
     }
