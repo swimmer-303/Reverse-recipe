@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Analysis } from "./api/analyze/gemini";
 import Result from "./components/Result";
 import CookMode from "./components/CookMode";
-import { loadVoices, pickVoice, speakLines, stopSpeaking } from "./lib/voice";
+import { speak, stopSpeech } from "./lib/voice";
 
 // Downscale + re-encode in the browser so uploads stay small and fast, and
 // so a 12MP phone photo never trips the server's size ceiling.
@@ -79,18 +79,7 @@ export default function Home() {
 
   const cameraInput = useRef<HTMLInputElement>(null);
   const libraryInput = useRef<HTMLInputElement>(null);
-  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
-
-  // Warm up the speech voices once so read-aloud can grab a natural one instantly.
-  useEffect(() => {
-    let alive = true;
-    loadVoices().then((v) => {
-      if (alive) voiceRef.current = pickVoice(v);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const [speaking, setSpeaking] = useState(false);
 
   // Advance the loading copy every second or so, but stop at the last line so
   // it doesn't loop forever on a slow request.
@@ -144,8 +133,9 @@ export default function Home() {
     };
   }, [phase]);
 
-  const stopSpeech = useCallback(() => {
-    stopSpeaking();
+  const haltSpeech = useCallback(() => {
+    stopSpeech();
+    setSpeaking(false);
   }, []);
 
   const handleFile = useCallback(async (file: File | undefined) => {
@@ -219,30 +209,31 @@ export default function Home() {
   }, [userKey, analyze]);
 
   const reset = useCallback(() => {
-    stopSpeech();
+    haltSpeech();
     setCookMode(false);
     setPhase("idle");
     setPreview(null);
     setPayload(null);
     setResult(null);
     setError("");
-  }, [stopSpeech]);
+  }, [haltSpeech]);
 
   const readAloud = useCallback(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis || !result) {
-      return;
-    }
+    if (!result) return;
     // Second tap stops.
-    if (window.speechSynthesis.speaking) {
-      stopSpeaking();
+    if (speaking) {
+      haltSpeech();
       return;
     }
-    const lines = [
-      `${result.dishName}.`,
-      ...result.steps.map((t, i) => `Step ${i + 1}. ${t}`),
-    ];
-    speakLines(lines, voiceRef.current);
-  }, [result]);
+    const script =
+      `${result.dishName}. ` +
+      result.steps.map((t, i) => `Step ${i + 1}. ${t}`).join(" ");
+    setSpeaking(true);
+    speak(script, {
+      userKey: savedKey || undefined,
+      onEnd: () => setSpeaking(false),
+    });
+  }, [result, speaking, savedKey, haltSpeech]);
 
   const isResults = phase === "done" && !cookMode;
 
@@ -290,8 +281,8 @@ export default function Home() {
           {isResults && (
             <div className="head-actions">
               <button
-                className="head-btn accent"
-                aria-label="Read steps aloud"
+                className={`head-btn accent ${speaking ? "live" : ""}`}
+                aria-label={speaking ? "Stop reading" : "Read steps aloud"}
                 onClick={readAloud}
               >
                 <svg
@@ -492,7 +483,7 @@ export default function Home() {
             <button
               className="btn btn-primary cook-cta"
               onClick={() => {
-                stopSpeech();
+                haltSpeech();
                 setCookMode(true);
               }}
             >
@@ -521,6 +512,7 @@ export default function Home() {
             <CookMode
               steps={result.steps}
               dishName={result.dishName}
+              userKey={savedKey || undefined}
               onExit={() => setCookMode(false)}
             />
           </main>

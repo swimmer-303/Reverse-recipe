@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadVoices, pickVoice, speakLines, stopSpeaking } from "../lib/voice";
+import { speak, stopSpeech, prefetchSpeech } from "../lib/voice";
 
 // ---- Minimal typing for the Web Speech recognition API (no lib.dom types) ----
 interface SRAlternative {
@@ -68,10 +68,12 @@ function classify(raw: string): Command | null {
 export default function CookMode({
   steps,
   dishName,
+  userKey,
   onExit,
 }: {
   steps: string[];
   dishName: string;
+  userKey?: string;
   onExit: () => void;
 }) {
   const [index, setIndex] = useState(0);
@@ -81,7 +83,6 @@ export default function CookMode({
   const [supported, setSupported] = useState(true);
   const [micError, setMicError] = useState("");
 
-  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const recogRef = useRef<SpeechRecognitionLike | null>(null);
   const listenRef = useRef(false); // whether the user wants the mic on
   const speakingRef = useRef(false); // ignore mic input while we talk to it
@@ -91,26 +92,20 @@ export default function CookMode({
     (i: number) => {
       speakingRef.current = true;
       setSpeaking(true);
-      speakLines([`Step ${i + 1}.`, steps[i]], voiceRef.current, {
+      speak(`Step ${i + 1}. ${steps[i]}`, {
+        userKey,
         onEnd: () => {
           speakingRef.current = false;
           setSpeaking(false);
         },
       });
+      // Warm the next step's audio so it plays without a pause.
+      if (i + 1 < steps.length) {
+        prefetchSpeech(`Step ${i + 2}. ${steps[i + 1]}`, userKey);
+      }
     },
-    [steps]
+    [steps, userKey]
   );
-
-  // Load a good voice once.
-  useEffect(() => {
-    let alive = true;
-    loadVoices().then((v) => {
-      if (alive) voiceRef.current = pickVoice(v);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // Detect support up front.
   useEffect(() => {
@@ -145,7 +140,7 @@ export default function CookMode({
         recogRef.current.abort();
       } catch {}
     }
-    stopSpeaking();
+    stopSpeech();
     onExit();
   }, [onExit]);
 
@@ -251,7 +246,7 @@ export default function CookMode({
           recogRef.current.abort();
         } catch {}
       }
-      stopSpeaking();
+      stopSpeech();
     };
   }, []);
 
