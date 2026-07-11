@@ -32,9 +32,10 @@ export async function POST(req: NextRequest) {
         "Cache-Control": "no-store",
       },
     });
-  } catch {
+  } catch (err) {
     // Any failure (endpoint changed, network, timeout) — the client quietly
-    // falls back to the on-device browser voice.
+    // falls back to the on-device browser voice. Log it so we can tell why.
+    console.error("edge-tts failed:", err instanceof Error ? err.stack || err.message : err);
     return NextResponse.json({ error: "tts unavailable" }, { status: 502 });
   }
 }
