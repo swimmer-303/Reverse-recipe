@@ -101,15 +101,10 @@ function ensureWorker(): Worker | null {
     pending.clear();
   };
 
-  // Kick off the model download. Prefer WebGPU when available; keep the small
-  // quantized weights either way so the download stays ~80MB.
-  const device =
-    typeof navigator !== "undefined" &&
-    (navigator as Navigator & { gpu?: unknown }).gpu
-      ? "webgpu"
-      : "wasm";
+  // Kick off the model download/init (backend + quantization are fixed in the
+  // worker to the combination that produces correct audio).
   setStatus("loading", 0);
-  worker.postMessage({ type: "load", device, dtype: "q8" });
+  worker.postMessage({ type: "load" });
   return worker;
 }
 

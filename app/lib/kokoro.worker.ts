@@ -12,17 +12,25 @@ env.allowLocalModels = false;
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 const VOICE = "af_heart"; // warm, natural American voice (highest-graded)
 
+// Run on the WASM backend with q8 weights. This is the combination the model
+// authors document and validate: q8 (int8) ops are NOT reliably supported on
+// the WebGPU backend and produce garbled, unintelligible audio there, so we do
+// not use WebGPU. WASM+q8 is a touch slower but sounds correct everywhere, and
+// keeps the download small (~80MB).
+const DEVICE = "wasm";
+const DTYPE = "q8";
+
 type InMsg =
-  | { type: "load"; device: "webgpu" | "wasm"; dtype: "fp32" | "q8" }
+  | { type: "load" }
   | { type: "generate"; id: number; text: string };
 
 let ttsPromise: Promise<KokoroTTS> | null = null;
 
-function load(device: "webgpu" | "wasm", dtype: "fp32" | "q8") {
+function load() {
   if (!ttsPromise) {
     ttsPromise = KokoroTTS.from_pretrained(MODEL_ID, {
-      dtype,
-      device,
+      dtype: DTYPE,
+      device: DEVICE,
       progress_callback: (p: { status?: string; progress?: number }) => {
         if (p?.status === "progress" && typeof p.progress === "number") {
           postMessage({ type: "progress", progress: p.progress });
@@ -41,12 +49,12 @@ function load(device: "webgpu" | "wasm", dtype: "fp32" | "q8") {
 self.onmessage = async (e: MessageEvent<InMsg>) => {
   const msg = e.data;
   if (msg.type === "load") {
-    load(msg.device, msg.dtype);
+    load();
     return;
   }
   if (msg.type === "generate") {
     try {
-      const tts = await load("wasm", "q8"); // no-op if already loading
+      const tts = await load(); // no-op if already loading
       const audio = await tts.generate(msg.text, { voice: VOICE });
       const wav = audio.toWav(); // ArrayBuffer
       postMessage({ type: "result", id: msg.id, wav }, { transfer: [wav] });
