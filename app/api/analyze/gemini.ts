@@ -2,7 +2,11 @@
 // We deliberately avoid the SDK so the whole thing stays dependency-free
 // and easy to reason about on the free tier.
 
-const MODEL = "gemini-2.5-flash";
+// "gemini-flash-latest" is an alias that always resolves to the current stable
+// Flash model. Pinning a specific version (e.g. gemini-2.5-flash) breaks the
+// moment Google retires it for new API keys — which is exactly what bit this
+// app before. The alias keeps us on a supported model without code changes.
+const MODEL = "gemini-flash-latest";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 // The shape we ask Gemini to fill in. Keeping it explicit means the model
