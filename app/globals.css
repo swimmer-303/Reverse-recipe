@@ -869,6 +869,211 @@ textarea {
   }
 }
 
+/* ---------- cook mode (flashcard stepper) ---------- */
+.cook-cta {
+  margin-bottom: 18px;
+}
+.head-btn.live {
+  border-color: var(--terra);
+  box-shadow: 0 0 0 3px rgba(187, 82, 48, 0.16);
+  animation: rr-pulse 1.6s ease infinite;
+}
+
+.cook {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  animation: rr-fade 0.4s ease both;
+}
+.cook-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.cook-dish {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cook-progress {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.cook-tick {
+  flex: 1;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--line);
+  transition: background 0.25s ease;
+}
+.cook-tick.done {
+  background: var(--terra);
+  opacity: 0.5;
+}
+.cook-tick.on {
+  background: var(--terra);
+  opacity: 1;
+}
+
+.cook-count {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--terra);
+  margin-bottom: 14px;
+}
+.cook-count span {
+  color: var(--muted);
+}
+
+.cook-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 32px 26px;
+  min-height: 210px;
+  box-shadow: var(--shadow-soft);
+  animation: rr-fade-up 0.35s ease both;
+}
+.cook-step {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 25px;
+  line-height: 1.42;
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.cook-mic-row {
+  display: flex;
+  justify-content: center;
+  min-height: 26px;
+  margin: 18px 0 6px;
+}
+.cook-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-align: center;
+}
+.cook-hint.muted {
+  color: var(--muted);
+  font-weight: 500;
+}
+.cook-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 15px;
+}
+.cook-eq i {
+  width: 3px;
+  border-radius: 3px;
+  background: var(--terra);
+  animation: rr-eq 0.9s ease infinite;
+}
+.cook-eq i:nth-child(1) {
+  height: 7px;
+  animation-delay: 0s;
+}
+.cook-eq i:nth-child(2) {
+  height: 14px;
+  animation-delay: 0.15s;
+}
+.cook-eq i:nth-child(3) {
+  height: 10px;
+  animation-delay: 0.3s;
+}
+
+.cook-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.cook-nav {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.cook-nav:hover:not(:disabled) {
+  border-color: var(--dash);
+}
+.cook-nav:active:not(:disabled) {
+  transform: scale(0.93);
+}
+.cook-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cook-nav.done-btn {
+  background: var(--terra);
+  border-color: var(--terra);
+  color: #fff;
+  box-shadow: 0 12px 24px -12px var(--terra-glow);
+}
+.cook-repeat {
+  flex: 1;
+  height: 62px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-weight: 700;
+  font-size: 14.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.cook-repeat:hover {
+  border-color: var(--dash);
+  color: var(--ink);
+}
+.cook-repeat:active {
+  transform: scale(0.97);
+}
+
+@keyframes rr-eq {
+  0%,
+  100% {
+    transform: scaleY(0.5);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

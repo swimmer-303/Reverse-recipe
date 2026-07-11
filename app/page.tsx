@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Analysis } from "./api/analyze/gemini";
 import Result from "./components/Result";
+import CookMode from "./components/CookMode";
+import { loadVoices, pickVoice, speakLines, stopSpeaking } from "./lib/voice";
 
 // Downscale + re-encode in the browser so uploads stay small and fast, and
 // so a 12MP phone photo never trips the server's size ceiling.
@@ -73,9 +75,22 @@ export default function Home() {
   const [keyReason, setKeyReason] = useState<"limit" | "missing">("limit");
   const [loadingLine, setLoadingLine] = useState(0);
   const [wakeActive, setWakeActive] = useState(false);
+  const [cookMode, setCookMode] = useState(false);
 
   const cameraInput = useRef<HTMLInputElement>(null);
   const libraryInput = useRef<HTMLInputElement>(null);
+  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+
+  // Warm up the speech voices once so read-aloud can grab a natural one instantly.
+  useEffect(() => {
+    let alive = true;
+    loadVoices().then((v) => {
+      if (alive) voiceRef.current = pickVoice(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Advance the loading copy every second or so, but stop at the last line so
   // it doesn't loop forever on a slow request.
@@ -130,9 +145,7 @@ export default function Home() {
   }, [phase]);
 
   const stopSpeech = useCallback(() => {
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
+    stopSpeaking();
   }, []);
 
   const handleFile = useCallback(async (file: File | undefined) => {
@@ -207,6 +220,7 @@ export default function Home() {
 
   const reset = useCallback(() => {
     stopSpeech();
+    setCookMode(false);
     setPhase("idle");
     setPreview(null);
     setPayload(null);
@@ -218,21 +232,19 @@ export default function Home() {
     if (typeof window === "undefined" || !window.speechSynthesis || !result) {
       return;
     }
-    const s = window.speechSynthesis;
-    if (s.speaking) {
-      s.cancel();
+    // Second tap stops.
+    if (window.speechSynthesis.speaking) {
+      stopSpeaking();
       return;
     }
-    const script =
-      `${result.dishName}. ` +
-      result.steps.map((t, i) => `Step ${i + 1}. ${t}`).join(" ");
-    const u = new SpeechSynthesisUtterance(script);
-    u.rate = 0.96;
-    s.cancel();
-    s.speak(u);
+    const lines = [
+      `${result.dishName}.`,
+      ...result.steps.map((t, i) => `Step ${i + 1}. ${t}`),
+    ];
+    speakLines(lines, voiceRef.current);
   }, [result]);
 
-  const isResults = phase === "done";
+  const isResults = phase === "done" && !cookMode;
 
   return (
     <div className="app">
@@ -475,9 +487,42 @@ export default function Home() {
         )}
 
         {/* ===== RESULTS ===== */}
-        {phase === "done" && result && (
+        {phase === "done" && result && !cookMode && (
           <main className="screen">
+            <button
+              className="btn btn-primary cook-cta"
+              onClick={() => {
+                stopSpeech();
+                setCookMode(true);
+              }}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                <path d="M19 10a7 7 0 0 1-14 0M12 17v4" />
+              </svg>
+              Start hands-free cook mode
+            </button>
             <Result data={result} image={preview} wakeActive={wakeActive} />
+          </main>
+        )}
+
+        {/* ===== COOK MODE (flashcard stepper) ===== */}
+        {phase === "done" && result && cookMode && (
+          <main className="screen">
+            <CookMode
+              steps={result.steps}
+              dishName={result.dishName}
+              onExit={() => setCookMode(false)}
+            />
           </main>
         )}
 
