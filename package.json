@@ -9,9 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "next": "15.5.20",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^22",

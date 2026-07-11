@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GeminiError } from "../analyze/gemini";
-import { synthesizeSpeech } from "./tts";
+import { synthesizeSpeech } from "./edge-tts";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 30;
 
-// Keep a lid on how much text we'll voice in one call — a whole recipe is fine,
-// a novel is not.
+// Keep a lid on how much we'll voice in one call — a whole recipe is fine.
 const MAX_CHARS = 5000;
 
 export async function POST(req: NextRequest) {
-  let body: { text?: string; userKey?: string };
+  let body: { text?: string };
   try {
     body = await req.json();
   } catch {
@@ -25,25 +23,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "That's too long to read." }, { status: 413 });
   }
 
-  const key = body.userKey?.trim() || process.env.GEMINI_API_KEY;
-  if (!key) {
-    // No key — the client falls back to the browser voice on any non-OK reply.
-    return NextResponse.json({ error: "no key", code: "NO_KEY" }, { status: 503 });
-  }
-
   try {
-    const wav = await synthesizeSpeech(text, key);
-    return new NextResponse(new Uint8Array(wav), {
+    const mp3 = await synthesizeSpeech(text);
+    return new NextResponse(new Uint8Array(mp3), {
       status: 200,
       headers: {
-        "Content-Type": "audio/wav",
+        "Content-Type": "audio/mpeg",
         "Cache-Control": "no-store",
       },
     });
-  } catch (err) {
-    const status = err instanceof GeminiError ? err.status : 500;
-    // The client treats any failure the same way: quietly fall back to the
-    // on-device voice, so a plain status is all it needs.
-    return NextResponse.json({ error: "tts failed" }, { status });
+  } catch {
+    // Any failure (endpoint changed, network, timeout) — the client quietly
+    // falls back to the on-device browser voice.
+    return NextResponse.json({ error: "tts unavailable" }, { status: 502 });
   }
 }
