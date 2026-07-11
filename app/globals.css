@@ -869,6 +869,29 @@ textarea {
   }
 }
 
+/* ---------- neural voice loading hint ---------- */
+.voice-prep {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.voice-prep-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--terra);
+  animation: rr-pulse 1.2s ease infinite;
+}
+
 /* ---------- cook mode (flashcard stepper) ---------- */
 .cook-cta {
   margin-bottom: 18px;

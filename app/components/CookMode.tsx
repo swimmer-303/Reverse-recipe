@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { speak, stopSpeech, prefetchSpeech } from "../lib/voice";
+import {
+  speak,
+  stopSpeech,
+  prefetchSpeech,
+  prepareVoice,
+  onVoiceStatus,
+  type VoiceState,
+} from "../lib/voice";
 
 // ---- Minimal typing for the Web Speech recognition API (no lib.dom types) ----
 interface SRAlternative {
@@ -82,6 +89,8 @@ export default function CookMode({
   const [speaking, setSpeaking] = useState(false);
   const [supported, setSupported] = useState(true);
   const [micError, setMicError] = useState("");
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [voiceProgress, setVoiceProgress] = useState(0);
 
   const recogRef = useRef<SpeechRecognitionLike | null>(null);
   const listenRef = useRef(false); // whether the user wants the mic on
@@ -101,15 +110,20 @@ export default function CookMode({
       });
       // Warm the next step's audio so it plays without a pause.
       if (i + 1 < steps.length) {
-        prefetchSpeech(`Step ${i + 2}. ${steps[i + 1]}`, userKey);
+        prefetchSpeech(`Step ${i + 2}. ${steps[i + 1]}`);
       }
     },
     [steps, userKey]
   );
 
-  // Detect support up front.
+  // Detect support up front and start warming the neural voice.
   useEffect(() => {
     setSupported(!!getRecognitionCtor());
+    prepareVoice();
+    return onVoiceStatus((s) => {
+      setVoiceState(s.state);
+      setVoiceProgress(s.progress);
+    });
   }, []);
 
   // Speak each step as it becomes active.
@@ -313,7 +327,16 @@ export default function CookMode({
       </div>
 
       <div className="cook-mic-row" data-active={listening}>
-        {!supported ? (
+        {speaking && voiceState === "loading" ? (
+          <span className="cook-hint">
+            <span className="cook-eq">
+              <i />
+              <i />
+              <i />
+            </span>
+            Preparing the natural voice… {voiceProgress}%
+          </span>
+        ) : !supported ? (
           <span className="cook-hint muted">
             Voice commands aren&apos;t supported in this browser — use the buttons.
           </span>

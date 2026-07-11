@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Analysis } from "./api/analyze/gemini";
 import Result from "./components/Result";
 import CookMode from "./components/CookMode";
-import { speak, stopSpeech } from "./lib/voice";
+import {
+  speak,
+  stopSpeech,
+  prepareVoice,
+  onVoiceStatus,
+  type VoiceState,
+} from "./lib/voice";
 
 // Downscale + re-encode in the browser so uploads stay small and fast, and
 // so a 12MP phone photo never trips the server's size ceiling.
@@ -76,10 +82,23 @@ export default function Home() {
   const [loadingLine, setLoadingLine] = useState(0);
   const [wakeActive, setWakeActive] = useState(false);
   const [cookMode, setCookMode] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [voice, setVoice] = useState<{ state: VoiceState; progress: number }>({
+    state: "idle",
+    progress: 0,
+  });
 
   const cameraInput = useRef<HTMLInputElement>(null);
   const libraryInput = useRef<HTMLInputElement>(null);
-  const [speaking, setSpeaking] = useState(false);
+
+  // Track the on-device voice model's load status for the "preparing" hint.
+  useEffect(() => onVoiceStatus(setVoice), []);
+
+  // Start downloading the neural voice as soon as results appear, so the first
+  // tap on "read aloud" is likely ready to go.
+  useEffect(() => {
+    if (phase === "done") prepareVoice();
+  }, [phase]);
 
   // Advance the loading copy every second or so, but stop at the last line so
   // it doesn't loop forever on a slow request.
@@ -480,6 +499,12 @@ export default function Home() {
         {/* ===== RESULTS ===== */}
         {phase === "done" && result && !cookMode && (
           <main className="screen">
+            {speaking && voice.state === "loading" && (
+              <div className="voice-prep" role="status">
+                <span className="voice-prep-dot" />
+                Preparing the natural voice… {voice.progress}%
+              </div>
+            )}
             <button
               className="btn btn-primary cook-cta"
               onClick={() => {

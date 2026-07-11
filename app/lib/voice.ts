@@ -1,42 +1,224 @@
-// On-device read-aloud via the browser's Web Speech API. It's free and works
-// everywhere, but the voice quality is capped by whatever the device ships —
-// we pick the most natural installed voice and speak a line at a time (each
-// queues separately, which dodges Chrome's ~15s mid-utterance cutoff).
+// Read-aloud voice controller.
+//
+// Primary: Kokoro, a small neural TTS model that runs 100% on-device in a Web
+// Worker (WebAssembly / WebGPU). It sounds genuinely human, is completely free,
+// and — because it runs in the user's browser — has none of the IP-blocking or
+// cost problems of hosted TTS. The weights (~80MB, quantized) download once and
+// are cached by the browser thereafter.
+//
+// Fallback: the browser's built-in Web Speech voice, used if the device can't
+// load the model (old browser, no storage, fetch blocked). It's robotic but it
+// always works, so read-aloud never simply fails.
+
+// ---------------------------------------------------------------------------
+// Loading status (so the UI can show "preparing voice" on first use)
+// ---------------------------------------------------------------------------
+
+export type VoiceState = "idle" | "loading" | "ready" | "error";
+type StatusListener = (s: { state: VoiceState; progress: number }) => void;
+
+let state: VoiceState = "idle";
+let progress = 0;
+const listeners = new Set<StatusListener>();
+
+function setStatus(next: VoiceState, p?: number) {
+  state = next;
+  if (typeof p === "number") progress = p;
+  listeners.forEach((cb) => cb({ state, progress }));
+}
+
+export function onVoiceStatus(cb: StatusListener): () => void {
+  listeners.add(cb);
+  cb({ state, progress });
+  return () => listeners.delete(cb);
+}
+
+// ---------------------------------------------------------------------------
+// Kokoro worker
+// ---------------------------------------------------------------------------
+
+let worker: Worker | null = null;
+let kokoroEnabled = true; // flips false permanently if the model can't load
+let reqId = 0;
+const pending = new Map<
+  number,
+  { resolve: (url: string | null) => void }
+>();
+const urlCache = new Map<string, string>(); // text -> object URL
+const inflight = new Map<string, Promise<string | null>>();
+
+let audioEl: HTMLAudioElement | null = null;
+let token = 0; // bumps on stop / new speak to cancel stale playback
+
+function getAudio(): HTMLAudioElement {
+  if (!audioEl) audioEl = new Audio();
+  return audioEl;
+}
+
+function ensureWorker(): Worker | null {
+  if (!kokoroEnabled) return null;
+  if (worker) return worker;
+  if (typeof window === "undefined" || typeof Worker === "undefined") {
+    kokoroEnabled = false;
+    return null;
+  }
+  try {
+    worker = new Worker(new URL("./kokoro.worker.ts", import.meta.url));
+  } catch {
+    kokoroEnabled = false;
+    return null;
+  }
+
+  worker.onmessage = (e: MessageEvent) => {
+    const m = e.data;
+    if (m.type === "progress") {
+      if (state !== "ready") setStatus("loading", Math.round(m.progress));
+    } else if (m.type === "ready") {
+      setStatus("ready", 100);
+    } else if (m.type === "result") {
+      const p = pending.get(m.id);
+      pending.delete(m.id);
+      if (p) {
+        const blob = new Blob([m.wav], { type: "audio/wav" });
+        p.resolve(URL.createObjectURL(blob));
+      }
+    } else if (m.type === "error") {
+      const p = pending.get(m.id);
+      pending.delete(m.id);
+      if (p) p.resolve(null);
+    } else if (m.type === "fatal") {
+      // The model itself failed to load — give up on Kokoro for this session.
+      kokoroEnabled = false;
+      setStatus("error");
+      pending.forEach((p) => p.resolve(null));
+      pending.clear();
+    }
+  };
+  worker.onerror = () => {
+    kokoroEnabled = false;
+    setStatus("error");
+    pending.forEach((p) => p.resolve(null));
+    pending.clear();
+  };
+
+  // Kick off the model download. Prefer WebGPU when available; keep the small
+  // quantized weights either way so the download stays ~80MB.
+  const device =
+    typeof navigator !== "undefined" &&
+    (navigator as Navigator & { gpu?: unknown }).gpu
+      ? "webgpu"
+      : "wasm";
+  setStatus("loading", 0);
+  worker.postMessage({ type: "load", device, dtype: "q8" });
+  return worker;
+}
+
+// Start downloading/initialising the model ahead of the first tap.
+export function prepareVoice() {
+  ensureWorker();
+}
+
+function synth(text: string): Promise<string | null> {
+  const cached = urlCache.get(text);
+  if (cached) return Promise.resolve(cached);
+  const running = inflight.get(text);
+  if (running) return running;
+
+  const w = ensureWorker();
+  if (!w) return Promise.resolve(null);
+
+  const id = ++reqId;
+  const p = new Promise<string | null>((resolve) => {
+    pending.set(id, {
+      resolve: (url) => {
+        if (url) urlCache.set(text, url);
+        inflight.delete(text);
+        resolve(url);
+      },
+    });
+    w.postMessage({ type: "generate", id, text });
+  });
+  inflight.set(text, p);
+  return p;
+}
+
+// Warm the cache for an upcoming line (e.g. the next cook-mode step).
+export function prefetchSpeech(text: string) {
+  const t = text.trim();
+  if (t && kokoroEnabled) synth(t);
+}
 
 export interface SpeakOpts {
-  // Accepted for call-site compatibility; unused by the on-device voice.
-  userKey?: string;
+  userKey?: string; // accepted for call-site compatibility; unused
   onStart?: () => void;
   onEnd?: () => void;
 }
 
+export async function speak(text: string, opts: SpeakOpts = {}): Promise<void> {
+  const clean = text.trim();
+  if (!clean) return;
+  stopSpeech();
+  const mine = ++token;
+
+  if (kokoroEnabled) {
+    const url = await synth(clean);
+    if (mine !== token) return; // superseded while generating
+    if (url) {
+      const el = getAudio();
+      el.src = url;
+      el.onended = () => {
+        if (mine === token) opts.onEnd?.();
+      };
+      opts.onStart?.();
+      try {
+        await el.play();
+        return;
+      } catch {
+        if (mine !== token) return;
+        // fall through to browser voice
+      }
+    }
+  }
+
+  if (mine !== token) return;
+  browserSpeak(clean, opts.onStart, opts.onEnd);
+}
+
+export function stopSpeech(): void {
+  token++;
+  if (audioEl) {
+    audioEl.pause();
+    audioEl.onended = null;
+    audioEl.removeAttribute("src");
+  }
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Browser Web Speech fallback
+// ---------------------------------------------------------------------------
+
 let cachedVoices: SpeechSynthesisVoice[] = [];
 
-function loadVoices(): Promise<SpeechSynthesisVoice[]> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) {
-      resolve([]);
-      return;
-    }
-    const synth = window.speechSynthesis;
-    const now = synth.getVoices();
-    if (now.length) {
-      cachedVoices = now;
-      resolve(now);
-      return;
-    }
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
+function loadVoices() {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  const synth = window.speechSynthesis;
+  const now = synth.getVoices();
+  if (now.length) {
+    cachedVoices = now;
+    return;
+  }
+  synth.addEventListener(
+    "voiceschanged",
+    () => {
       cachedVoices = synth.getVoices();
-      synth.removeEventListener("voiceschanged", done);
-      resolve(cachedVoices);
-    };
-    synth.addEventListener("voiceschanged", done);
-    setTimeout(done, 600);
-  });
+    },
+    { once: true }
+  );
 }
+if (typeof window !== "undefined") loadVoices();
 
 const PREFERRED = [
   "samantha",
@@ -48,13 +230,12 @@ const PREFERRED = [
   "natural",
   "neural",
   "enhanced",
-  "premium",
 ];
 
-function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
-  if (!voices.length) return null;
-  const en = voices.filter((v) => v.lang?.toLowerCase().startsWith("en"));
-  const pool = en.length ? en : voices;
+function pickVoice(): SpeechSynthesisVoice | null {
+  if (!cachedVoices.length) return null;
+  const en = cachedVoices.filter((v) => v.lang?.toLowerCase().startsWith("en"));
+  const pool = en.length ? en : cachedVoices;
   let best: SpeechSynthesisVoice | null = null;
   let bestScore = -1;
   for (const v of pool) {
@@ -73,31 +254,19 @@ function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null 
   return best ?? pool[0];
 }
 
-// Warm the voice list on first import so the first read is ready.
-if (typeof window !== "undefined") {
-  loadVoices();
-}
-
-// No-op: the on-device voice needs no pre-fetching. Kept so callers (cook mode)
-// don't need to branch.
-export function prefetchSpeech(_text: string, _userKey?: string) {}
-
-export function speak(text: string, opts: SpeakOpts = {}): void {
-  const clean = text.trim();
-  if (!clean || typeof window === "undefined" || !window.speechSynthesis) {
-    opts.onEnd?.();
+function browserSpeak(text: string, onStart?: () => void, onEnd?: () => void) {
+  if (typeof window === "undefined" || !window.speechSynthesis) {
+    onEnd?.();
     return;
   }
   const synth = window.speechSynthesis;
   synth.cancel();
-  const voice = pickVoice(cachedVoices);
-  // Sentence-sized chunks: each queues separately so a long read doesn't trip
-  // Chrome's mid-utterance cutoff.
-  const lines = clean
+  const voice = pickVoice();
+  const lines = text
     .split(/(?<=[.!?])\s+/)
     .map((l) => l.trim())
     .filter(Boolean);
-  const chunks = lines.length ? lines : [clean];
+  const chunks = lines.length ? lines : [text];
   chunks.forEach((line, i) => {
     const u = new SpeechSynthesisUtterance(line);
     if (voice) {
@@ -106,14 +275,8 @@ export function speak(text: string, opts: SpeakOpts = {}): void {
     }
     u.rate = 1.0;
     u.pitch = 1.05;
-    if (i === 0 && opts.onStart) u.onstart = opts.onStart;
-    if (i === chunks.length - 1 && opts.onEnd) u.onend = opts.onEnd;
+    if (i === 0 && onStart) u.onstart = onStart;
+    if (i === chunks.length - 1 && onEnd) u.onend = onEnd;
     synth.speak(u);
   });
-}
-
-export function stopSpeech(): void {
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
 }
