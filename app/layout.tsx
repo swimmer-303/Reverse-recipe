@@ -1,8 +1,29 @@
 import type { Metadata, Viewport } from "next";
+import { Newsreader, Hanken_Grotesk } from "next/font/google";
 import "./globals.css";
 
+// Editorial display serif for the dish name and headings.
+const display = Newsreader({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  style: ["normal", "italic"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+// Highly legible grotesque for body copy and UI.
+const body = Hanken_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-body",
+  display: "swap",
+});
+
 export const viewport: Viewport = {
-  themeColor: "#c0562b",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f4ebdc" },
+    { media: "(prefers-color-scheme: dark)", color: "#16100c" },
+  ],
 };
 
 export const metadata: Metadata = {
@@ -23,7 +44,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${body.variable}`}>
       <body>{children}</body>
     </html>
   );
