@@ -91,7 +91,7 @@ export class GeminiError extends Error {
   }
 }
 
-export async function analyzeMeal(
+async function requestAnalysis(
   imageBase64: string,
   mimeType: string,
   apiKey: string
@@ -111,8 +111,16 @@ export async function analyzeMeal(
       ],
       generationConfig: {
         temperature: 0.4,
+        // Cap the output so a long recipe can't get truncated mid-JSON.
+        maxOutputTokens: 4096,
         responseMimeType: "application/json",
         responseSchema,
+        // gemini-2.5-flash "thinks" by default, and that reasoning eats the
+        // same token budget as the answer. Paired with a JSON schema it often
+        // spends the whole budget thinking and returns an empty candidate.
+        // We don't need chain-of-thought to read a plate, so switch it off —
+        // this is the single biggest reliability win for this call.
+        thinkingConfig: { thinkingBudget: 0 },
       },
     }),
   });
@@ -124,9 +132,21 @@ export async function analyzeMeal(
   }
 
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const candidate = data?.candidates?.[0];
+  const finish = candidate?.finishReason;
+  const text = candidate?.content?.parts
+    ?.map((p: { text?: string }) => p.text ?? "")
+    .join("")
+    .trim();
+
+  // A blocked or truncated response comes back with a finishReason but no
+  // usable text. Treat it as retryable so a single hiccup isn't fatal.
   if (!text) {
-    throw new GeminiError("The model didn't return anything usable.", 502);
+    const why =
+      finish === "SAFETY" || finish === "PROHIBITED_CONTENT"
+        ? "The photo was flagged and couldn't be analyzed."
+        : "The model didn't return anything usable.";
+    throw new GeminiError(why, 502);
   }
 
   try {
@@ -134,4 +154,26 @@ export async function analyzeMeal(
   } catch {
     throw new GeminiError("Couldn't parse the model's response.", 502);
   }
+}
+
+export async function analyzeMeal(
+  imageBase64: string,
+  mimeType: string,
+  apiKey: string
+): Promise<Analysis> {
+  let lastError: unknown;
+  // One retry: transient 5xx and empty/garbled responses are common on the
+  // free tier and usually clear on a second attempt. We never retry a 429
+  // (quota) or 4xx (bad key) — those won't fix themselves.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await requestAnalysis(imageBase64, mimeType, apiKey);
+    } catch (err) {
+      lastError = err;
+      const retryable =
+        err instanceof GeminiError && err.status >= 500 && err.status < 600;
+      if (!retryable) throw err;
+    }
+  }
+  throw lastError;
 }
