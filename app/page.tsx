@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Analysis } from "./api/analyze/gemini";
 import Result from "./components/Result";
 import CookMode from "./components/CookMode";
+import BrowserNotice from "./components/BrowserNotice";
 import {
   speak,
   stopSpeech,
@@ -371,6 +372,8 @@ export default function Home() {
             </div>
           )}
         </header>
+
+        <BrowserNotice />
 
         {/* hidden inputs: camera (capture) + library */}
         <input

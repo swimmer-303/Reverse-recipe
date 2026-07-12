@@ -713,6 +713,54 @@ textarea {
   justify-content: center;
   padding: 30px 22px;
 }
+/* Nudge for visitors on a browser that may not support the voice features. */
+.browser-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 14px;
+  padding: 12px 12px 12px 14px;
+  margin-bottom: 18px;
+  animation: rr-fade-up 0.4s ease both;
+}
+.browser-notice-icon {
+  flex: none;
+  color: var(--warn-icon);
+  margin-top: 1px;
+}
+.browser-notice-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--body-ink);
+}
+.browser-notice-text strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+.browser-notice-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.browser-notice-close:hover {
+  background: var(--warn-icon-bg);
+  color: var(--warn-icon);
+}
+
 .limit-banner {
   display: flex;
   gap: 14px;
