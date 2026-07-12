@@ -36,6 +36,10 @@ export default function Result({
   wakeActive: boolean;
 }) {
   const split = macroSplit(data.calories);
+  const perServing =
+    data.servings > 1 && data.calories.total > 0
+      ? Math.round(data.calories.total / data.servings)
+      : null;
 
   return (
     <div className="result">
@@ -76,6 +80,9 @@ export default function Result({
           <div>
             <div className="cal-num">{data.calories.total}</div>
             <div className="cal-label">Calories · whole dish</div>
+            {perServing && (
+              <div className="cal-per">{perServing} per serving</div>
+            )}
           </div>
           <div className="macro-list">
             <div>

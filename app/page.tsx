@@ -55,6 +55,11 @@ async function prepareImage(
 }
 
 type Phase = "idle" | "ready" | "loading" | "done" | "needkey" | "error";
+type KeyReason = "limit" | "missing" | "rejected";
+
+// The visitor's own Gemini key lives here and nowhere else — it's sent with the
+// analyze request and never stored server-side.
+const KEY_STORE = "rr.gemini-key";
 
 // Cycled through while the model works, so the wait feels less like a stall.
 const COOKING_LINES = [
@@ -78,7 +83,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [userKey, setUserKey] = useState("");
   const [savedKey, setSavedKey] = useState<string>("");
-  const [keyReason, setKeyReason] = useState<"limit" | "missing">("limit");
+  const [keyReason, setKeyReason] = useState<KeyReason>("limit");
   const [loadingLine, setLoadingLine] = useState(0);
   const [wakeActive, setWakeActive] = useState(false);
   const [cookMode, setCookMode] = useState(false);
@@ -93,6 +98,17 @@ export default function Home() {
 
   // Track the on-device voice model's load status for the "preparing" hint.
   useEffect(() => onVoiceStatus(setVoice), []);
+
+  // Re-use the key the visitor already pasted on a previous visit, so they only
+  // ever have to enter it once.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(KEY_STORE);
+      if (stored) setSavedKey(stored);
+    } catch {
+      // Private mode / storage disabled — the key just won't persist.
+    }
+  }, []);
 
   // Start downloading the neural voice as soon as results appear, so the first
   // tap on "read aloud" is likely ready to go.
@@ -157,6 +173,14 @@ export default function Home() {
     setSpeaking(false);
   }, []);
 
+  const forgetKey = useCallback(() => {
+    setSavedKey("");
+    setUserKey("");
+    try {
+      localStorage.removeItem(KEY_STORE);
+    } catch {}
+  }, []);
+
   const handleFile = useCallback(async (file: File | undefined) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -205,6 +229,13 @@ export default function Home() {
             setPhase("needkey");
             return;
           }
+          if (data.code === "BAD_KEY") {
+            // Drop the bad key rather than retrying with it forever.
+            forgetKey();
+            setKeyReason("rejected");
+            setPhase("needkey");
+            return;
+          }
           setError(data.error || "Something went wrong.");
           setPhase("error");
           return;
@@ -217,13 +248,16 @@ export default function Home() {
         setPhase("error");
       }
     },
-    [payload, savedKey]
+    [payload, savedKey, forgetKey]
   );
 
   const useOwnKey = useCallback(() => {
     const k = userKey.trim();
     if (!k) return;
     setSavedKey(k);
+    try {
+      localStorage.setItem(KEY_STORE, k);
+    } catch {}
     analyze(k);
   }, [userKey, analyze]);
 
@@ -248,11 +282,8 @@ export default function Home() {
       `${result.dishName}. ` +
       result.steps.map((t, i) => `Step ${i + 1}. ${t}`).join(" ");
     setSpeaking(true);
-    speak(script, {
-      userKey: savedKey || undefined,
-      onEnd: () => setSpeaking(false),
-    });
-  }, [result, speaking, savedKey, haltSpeech]);
+    speak(script, { onEnd: () => setSpeaking(false) });
+  }, [result, speaking, haltSpeech]);
 
   const isResults = phase === "done" && !cookMode;
 
@@ -505,39 +536,40 @@ export default function Home() {
                 Preparing the natural voice… {voice.progress}%
               </div>
             )}
-            <button
-              className="btn btn-primary cook-cta"
-              onClick={() => {
-                haltSpeech();
-                setCookMode(true);
-              }}
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {result.steps.length > 0 && (
+              <button
+                className="btn btn-primary cook-cta"
+                onClick={() => {
+                  haltSpeech();
+                  setCookMode(true);
+                }}
               >
-                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                <path d="M19 10a7 7 0 0 1-14 0M12 17v4" />
-              </svg>
-              Start hands-free cook mode
-            </button>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                  <path d="M19 10a7 7 0 0 1-14 0M12 17v4" />
+                </svg>
+                Start hands-free cook mode
+              </button>
+            )}
             <Result data={result} image={preview} wakeActive={wakeActive} />
           </main>
         )}
 
         {/* ===== COOK MODE (flashcard stepper) ===== */}
-        {phase === "done" && result && cookMode && (
+        {phase === "done" && result && cookMode && result.steps.length > 0 && (
           <main className="screen">
             <CookMode
               steps={result.steps}
               dishName={result.dishName}
-              userKey={savedKey || undefined}
               onExit={() => setCookMode(false)}
             />
           </main>
@@ -566,12 +598,16 @@ export default function Home() {
                 <div className="limit-title">
                   {keyReason === "missing"
                     ? "Add your Gemini key"
-                    : "Daily limit reached"}
+                    : keyReason === "rejected"
+                      ? "That key didn't work"
+                      : "Daily limit reached"}
                 </div>
                 <p className="limit-text">
                   {keyReason === "missing"
                     ? "This demo needs a Google AI key to read your photo. Drop in your own free key to start cooking — it stays in your browser and is only sent with this request."
-                    : "The shared demo key just ran out of free requests for now. Keep going instantly with your own free Google AI key — it stays in your browser and is only sent with this request."}
+                    : keyReason === "rejected"
+                      ? "Google turned that key down, so it's been cleared. Double-check you pasted the whole thing, then try again — it stays in your browser and is only sent with this request."
+                      : "The shared demo key just ran out of free requests for now. Keep going instantly with your own free Google AI key — it stays in your browser and is only sent with this request."}
                 </p>
               </div>
             </div>

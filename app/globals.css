@@ -549,6 +549,12 @@ textarea {
   color: var(--strip-muted);
   margin-top: 3px;
 }
+.cal-per {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--strip-muted);
+  margin-top: 5px;
+}
 .macro-list {
   display: flex;
   gap: 18px;
@@ -1138,6 +1144,7 @@ textarea {
     border: 1px solid #ddd;
   }
   .nutri .cal-label,
+  .nutri .cal-per,
   .nutri .macro-label {
     color: #555;
   }

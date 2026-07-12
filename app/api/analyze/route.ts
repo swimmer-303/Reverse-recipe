@@ -67,10 +67,11 @@ export async function POST(req: NextRequest) {
           { status: 429 }
         );
       }
-      // A bad key the user pasted.
+      // A bad key the user pasted. Flag it so the client can drop the stored
+      // key instead of retrying with it forever.
       if ((err.status === 400 || err.status === 403) && usingOwnKey) {
         return NextResponse.json(
-          { error: "That key was rejected — double-check you pasted it correctly." },
+          { error: "rejected", code: "BAD_KEY" },
           { status: 400 }
         );
       }

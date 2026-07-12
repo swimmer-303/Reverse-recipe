@@ -54,33 +54,32 @@ function getRecognitionCtor(): SRCtor | null {
 
 type Command = "next" | "prev" | "repeat" | "first" | "exit";
 
-// Map a spoken phrase to a step action. Checked in an order that avoids
-// overlaps ("go back" vs "go on").
+// Map a spoken phrase to a step action. Order matters: "start over" has to beat
+// "over", "go back" has to beat "go on". Matching is on whole words, so
+// "background" never reads as "back".
+const PATTERNS: Array<[Command, RegExp]> = [
+  ["first", /\b(start over|first step|from the top|restart|beginning)\b/],
+  ["exit", /\b(exit|close|stop cooking|i'?m done|all done|finish|quit)\b/],
+  ["prev", /\b(go back|back|previous|last step|step back)\b/],
+  ["repeat", /\b(repeat|again|one more time|what was that)\b/],
+  ["next", /\b(next|forward|continue|go on|keep going|ready|onward)\b/],
+];
+
 function classify(raw: string): Command | null {
-  const p = ` ${raw.toLowerCase().trim()} `;
-  const has = (...w: string[]) => w.some((x) => p.includes(` ${x} `) || p.includes(x));
-  if (has("go back", "back", "previous", "last step", "step back", "before"))
-    return "prev";
-  if (has("repeat", "again", "say that again", "read again", "one more time", "what was that"))
-    return "repeat";
-  if (has("start over", "first step", "from the top", "restart", "beginning"))
-    return "first";
-  if (has("exit", "close", "stop cooking", "i'm done", "im done", "finish", "quit", "all done"))
-    return "exit";
-  if (has("next", "forward", "continue", "go on", "keep going", "ready", "onward", "next step"))
-    return "next";
+  const phrase = raw.toLowerCase().trim();
+  for (const [cmd, re] of PATTERNS) {
+    if (re.test(phrase)) return cmd;
+  }
   return null;
 }
 
 export default function CookMode({
   steps,
   dishName,
-  userKey,
   onExit,
 }: {
   steps: string[];
   dishName: string;
-  userKey?: string;
   onExit: () => void;
 }) {
   const [index, setIndex] = useState(0);
@@ -95,14 +94,17 @@ export default function CookMode({
   const recogRef = useRef<SpeechRecognitionLike | null>(null);
   const listenRef = useRef(false); // whether the user wants the mic on
   const speakingRef = useRef(false); // ignore mic input while we talk to it
+  const indexRef = useRef(0); // current step, readable from stable callbacks
   const total = steps.length;
+
+  indexRef.current = index;
 
   const speakStep = useCallback(
     (i: number) => {
+      if (!steps[i]) return;
       speakingRef.current = true;
       setSpeaking(true);
       speak(`Step ${i + 1}. ${steps[i]}`, {
-        userKey,
         onEnd: () => {
           speakingRef.current = false;
           setSpeaking(false);
@@ -113,7 +115,7 @@ export default function CookMode({
         prefetchSpeech(`Step ${i + 2}. ${steps[i + 1]}`);
       }
     },
-    [steps, userKey]
+    [steps]
   );
 
   // Detect support up front and start warming the neural voice.
@@ -140,11 +142,10 @@ export default function CookMode({
   }, []);
   const goFirst = useCallback(() => setIndex(0), []);
   const repeat = useCallback(() => {
-    // Re-run speech for the current step without changing index.
-    setIndex((i) => {
-      speakStep(i);
-      return i;
-    });
+    // Re-read the current step without changing the index. (Reading it from a
+    // ref rather than a setIndex updater — updaters must stay side-effect free
+    // or React can run them twice and speak the step twice.)
+    speakStep(indexRef.current);
   }, [speakStep]);
 
   const exit = useCallback(() => {
